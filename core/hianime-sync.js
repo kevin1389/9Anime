@@ -1,0 +1,461 @@
+// HiAnime Auto-Sync Engine
+// Fetches anime covers, titles, episodes, rankings, and schedules sync every 6 hours.
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { searchHiAnime, getHiAnimeEpisodes, browseHiAnime } from "./hianime-service.js";
+
+const __dir = dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = join(__dir, "..", "data");
+const CACHE_FILE = join(DATA_DIR, "hianime-cache.json");
+
+const BASE_URL = "https://hianime.at";
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 Hours
+
+// In-memory synced state
+let syncState = {
+  isSyncing: false,
+  lastSyncTime: 0,
+  nextSyncTime: 0,
+  totalAnimeCount: 0,
+  lastError: null,
+  syncLogs: [],
+  data: {
+    spotlight: [],
+    trending: [],
+    latestEpisodes: [],
+    topAiring: [],
+    mostPopular: [],
+    mostFavorite: [],
+    latestCompleted: [],
+    topUpcoming: [],
+    allAnime: [],
+    categories: {}
+  }
+};
+
+function logSync(msg) {
+  const timestamp = new Date().toISOString();
+  const entry = `[${timestamp}] ${msg}`;
+  console.log(`[HiAnime Sync] ${entry}`);
+  syncState.syncLogs.unshift(entry);
+  if (syncState.syncLogs.length > 50) syncState.syncLogs.pop();
+}
+
+function decodeEntities(str) {
+  return (str || "")
+    .replace(/&#039;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+}
+
+// Robust HTML Parser for HiAnime Film Item Cards
+function parseHiAnimeCards(html, categoryName = "general") {
+  const items = [];
+  if (!html) return items;
+
+  const chunks = html.split(/<div class="flw-item/);
+  for (let i = 1; i < chunks.length; i++) {
+    try {
+      const chunk = chunks[i];
+
+      // Poster Image
+      const imgMatch = chunk.match(/src="([^"]+)"/);
+      const posterUrl = imgMatch ? imgMatch[1] : "";
+
+      // Anime ID & Watch Link
+      const idMatch = chunk.match(/data-id="(\d+)"/);
+      const linkMatch = chunk.match(/href="([^"]+)"/);
+      const id = idMatch ? idMatch[1] : "";
+      const watchUrl = linkMatch ? linkMatch[1] : "";
+
+      // Title & JName
+      const titleMatch = chunk.match(/class="dynamic-name"[^>]*data-jname="([^"]*)"[^>]*>([^<]+)<\/a>/) ||
+                         chunk.match(/class="dynamic-name"[^>]*>([^<]+)<\/a>/);
+      let titleEnglish = "";
+      let titleJname = "";
+      if (titleMatch) {
+        if (titleMatch.length >= 3) {
+          titleJname = decodeEntities(titleMatch[1]);
+          titleEnglish = decodeEntities(titleMatch[2]);
+        } else {
+          titleEnglish = decodeEntities(titleMatch[1]);
+        }
+      }
+
+      // Sub & Dub Episode Counts
+      const subMatch = chunk.match(/tick-sub[^>]*>[\s\S]*?(\d+)\s*<\/div>/);
+      const dubMatch = chunk.match(/tick-dub[^>]*>[\s\S]*?(\d+)\s*<\/div>/);
+      const epsMatch = chunk.match(/tick-eps[^>]*>[\s\S]*?(\d+)\s*<\/div>/);
+
+      const subCount = subMatch ? parseInt(subMatch[1], 10) : 0;
+      const dubCount = dubMatch ? parseInt(dubMatch[1], 10) : 0;
+      const totalEps = epsMatch ? parseInt(epsMatch[1], 10) : (subCount || dubCount || 12);
+
+      // Meta info (Format, Duration, Rating)
+      const formatMatch = chunk.match(/<span class="fdi-item">([^<]+)<\/span>/);
+      const durationMatch = chunk.match(/<span class="fdi-item fdi-duration">([^<]+)<\/span>/);
+      const format = formatMatch ? decodeEntities(formatMatch[1]).toUpperCase() : "TV";
+      const duration = durationMatch ? decodeEntities(durationMatch[1]) : "24m";
+
+      if (id && (titleEnglish || titleJname)) {
+        const displayTitle = titleEnglish || titleJname;
+        items.push({
+          id: Number(id) || id,
+          hianimeId: String(id),
+          title: {
+            english: displayTitle,
+            romaji: titleJname || displayTitle,
+            userPreferred: displayTitle
+          },
+          titleStr: displayTitle,
+          coverImage: {
+            extraLarge: posterUrl,
+            large: posterUrl,
+            medium: posterUrl
+          },
+          poster: posterUrl,
+          episodes: totalEps,
+          subCount: subCount || totalEps,
+          dubCount: dubCount,
+          totalEpisodes: totalEps,
+          latestEpisode: subCount || totalEps,
+          format: format,
+          duration: duration,
+          category: categoryName,
+          url: watchUrl.startsWith("http") ? watchUrl : `${BASE_URL}${watchUrl}`,
+          syncedAt: Date.now()
+        });
+      }
+    } catch (e) {
+      // ignore item parse error
+    }
+  }
+
+  return items;
+}
+
+// Scrape Spotlight Slider items from HiAnime Home (#slider)
+function parseHiAnimeSpotlights(html) {
+  const spotlights = [];
+  if (!html) return spotlights;
+
+  const sliderStart = html.indexOf('id="slider"');
+  if (sliderStart === -1) return spotlights;
+
+  const sliderBlock = html.substring(sliderStart, sliderStart + 35000);
+  const slides = sliderBlock.split('<div class="deslide-item">');
+
+  for (let i = 1; i < slides.length; i++) {
+    try {
+      const slide = slides[i];
+      const imgMatch = slide.match(/<img [^>]*class="film-poster-img"[^>]*src="([^"]+)"/) || slide.match(/src="([^"]+)"/);
+      const rankMatch = slide.match(/class="desi-sub-text">#?(\d+)?\s*Spotlight<\/div>/);
+      const titleMatch = slide.match(/class="desi-head-title dynamic-name"[^>]*data-jname="([^"]*)"[^>]*>([\s\S]*?)<\/div>/);
+      const descMatch = slide.match(/class="desi-description">([\s\S]*?)<\/div>/);
+      const watchMatch = slide.match(/href="([^"]+)"[^>]*class="[^"]*btn-slide-watch[^"]*"/) || slide.match(/href="([^"]+)"/);
+      const formatMatch = slide.match(/<i class="fas fa-play-circle mr-1"><\/i>([^<]+)/);
+      const durationMatch = slide.match(/<i class="fas fa-clock mr-1"><\/i>([^<]+)/);
+      const dateMatch = slide.match(/<i class="fas fa-calendar mr-1"><\/i>([^<]+)/);
+      const subMatch = slide.match(/tick-sub[^>]*>[\s\S]*?(\d+)\s*<\/div>/);
+      const dubMatch = slide.match(/tick-dub[^>]*>[\s\S]*?(\d+)\s*<\/div>/);
+
+      const banner = imgMatch ? imgMatch[1] : "";
+      const rank = rankMatch && rankMatch[1] ? parseInt(rankMatch[1], 10) : i;
+      const jname = titleMatch ? decodeEntities(titleMatch[1].trim()) : "";
+      const english = titleMatch ? decodeEntities(titleMatch[2].replace(/<[^>]*>/g, "").trim()) : "";
+      const displayTitle = english || jname;
+      const desc = descMatch ? decodeEntities(descMatch[1].replace(/<[^>]*>/g, "").trim()) : "";
+      const watchUrl = watchMatch ? watchMatch[1].trim() : "";
+      const idMatch = watchUrl.match(/-(\d+)$/);
+      const id = idMatch ? idMatch[1] : (1000 + i);
+
+      const subCount = subMatch ? parseInt(subMatch[1], 10) : 24;
+      const dubCount = dubMatch ? parseInt(dubMatch[1], 10) : 0;
+      const format = formatMatch ? decodeEntities(formatMatch[1]).trim() : "TV";
+      const duration = durationMatch ? decodeEntities(durationMatch[1]).trim() : "24m";
+
+      if (displayTitle && banner) {
+        spotlights.push({
+          id: Number(id) || id,
+          hianimeId: String(id),
+          rank,
+          title: { english: displayTitle, romaji: jname || displayTitle, userPreferred: displayTitle },
+          titleStr: displayTitle,
+          bannerImage: banner,
+          coverImage: { extraLarge: banner, large: banner, medium: banner },
+          poster: banner,
+          description: desc,
+          format: format,
+          duration: duration,
+          episodes: subCount || 24,
+          subCount: subCount,
+          dubCount: dubCount,
+          totalEpisodes: subCount || 24,
+          latestEpisode: subCount || 24,
+          url: watchUrl.startsWith("http") ? watchUrl : `${BASE_URL}${watchUrl}`,
+          syncedAt: Date.now()
+        });
+      }
+    } catch (e) {}
+  }
+
+  return spotlights;
+}
+
+// Scrape Real Trending Items from HiAnime Home (#trending-home)
+function parseHiAnimeTrending(html) {
+  const trending = [];
+  if (!html) return trending;
+
+  const trendMatch = html.match(/<div id="anime-trending">([\s\S]*?)<\/section>/);
+  if (!trendMatch) return trending;
+
+  const trendBlock = trendMatch[1];
+  const slides = trendBlock.split('<div class="swiper-slide">');
+
+  for (let i = 1; i < slides.length; i++) {
+    try {
+      const slide = slides[i];
+      const numMatch = slide.match(/class="number"[\s\S]*?<span>(\d+)<\/span>/);
+      const titleMatch = slide.match(/class="film-title dynamic-name"[^>]*data-jname="([^"]*)"[^>]*>([\s\S]*?)<\/div>/);
+      const hrefMatch = slide.match(/class="film-poster"[^>]*href="([^"]+)"/);
+      const imgMatch = slide.match(/<img [^>]*src="([^"]+)"/);
+
+      if (numMatch && (titleMatch || hrefMatch)) {
+        const rank = parseInt(numMatch[1], 10);
+        const jname = titleMatch ? decodeEntities(titleMatch[1].trim()) : "";
+        const english = titleMatch ? decodeEntities(titleMatch[2].replace(/<[^>]*>/g, "").trim()) : "";
+        const displayTitle = english || jname;
+        const watchUrl = hrefMatch ? hrefMatch[1].trim() : "";
+        const poster = imgMatch ? imgMatch[1].trim() : "";
+        const idMatch = watchUrl.match(/-(\d+)$/);
+        const id = idMatch ? idMatch[1] : (2000 + rank);
+
+        trending.push({
+          id: Number(id) || id,
+          hianimeId: String(id),
+          rank,
+          title: { english: displayTitle, romaji: jname || displayTitle, userPreferred: displayTitle },
+          titleStr: displayTitle,
+          coverImage: { extraLarge: poster, large: poster, medium: poster },
+          poster: poster,
+          bannerImage: poster,
+          format: "TV",
+          episodes: 24,
+          subCount: 24,
+          dubCount: 12,
+          trendingScore: Math.round((99.8 - (rank - 1) * 0.9) * 10) / 10,
+          neonColor: rank % 3 === 1 ? "rgba(255, 59, 107, 0.85)" : (rank % 3 === 2 ? "rgba(129, 140, 248, 0.85)" : "rgba(6, 182, 212, 0.85)"),
+          url: watchUrl.startsWith("http") ? watchUrl : `${BASE_URL}${watchUrl}`,
+          syncedAt: Date.now()
+        });
+      }
+    } catch (e) {}
+  }
+
+  return trending;
+}
+
+// Main Sync Worker Function
+export async function runHiAnimeSync() {
+  if (syncState.isSyncing) {
+    logSync("Sync is already running in background, skipping duplicate run.");
+    return syncState;
+  }
+
+  syncState.isSyncing = true;
+  syncState.lastError = null;
+  logSync("Starting complete HiAnime catalog sync...");
+
+  const allAnimeMap = new Map();
+  const categoriesData = {};
+
+  try {
+    // 1. Fetch Home Page (Spotlight, Trending, Latest releases)
+    logSync("Fetching https://hianime.at/home...");
+    const homeRes = await fetch(`${BASE_URL}/home`, {
+      headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml,*/*" },
+      signal: AbortSignal.timeout(12000)
+    });
+
+    if (homeRes.ok) {
+      const homeHtml = await homeRes.text();
+      const spotlights = parseHiAnimeSpotlights(homeHtml);
+      const trendingItems = parseHiAnimeTrending(homeHtml);
+      const homeCards = parseHiAnimeCards(homeHtml, "home");
+
+      if (spotlights.length > 0) {
+        syncState.data.spotlight = spotlights;
+        spotlights.forEach(a => allAnimeMap.set(String(a.id), a));
+        logSync(`Extracted ${spotlights.length} spotlight anime banners from HiAnime.`);
+      }
+
+      if (trendingItems.length > 0) {
+        syncState.data.trending = trendingItems;
+        trendingItems.forEach(a => allAnimeMap.set(String(a.id), a));
+        logSync(`Extracted ${trendingItems.length} live trending items from HiAnime (#trending-home).`);
+      } else if (homeCards.length > 0) {
+        syncState.data.trending = homeCards.slice(0, 12).map((a, i) => ({
+          ...a,
+          rank: i + 1,
+          trendingScore: Math.round((99.5 - i * 2.1) * 10) / 10,
+          neonColor: i % 3 === 0 ? "rgba(255, 59, 107, 0.85)" : (i % 3 === 1 ? "rgba(129, 140, 248, 0.85)" : "rgba(6, 182, 212, 0.85)")
+        }));
+      }
+
+      homeCards.forEach(a => allAnimeMap.set(String(a.id), a));
+    }
+
+    // 2. Fetch Category Feeds from HiAnime
+    const targetCategories = [
+      { name: "latestEpisodes", url: `${BASE_URL}/recently-updated` },
+      { name: "topAiring", url: `${BASE_URL}/top-airing` },
+      { name: "mostPopular", url: `${BASE_URL}/most-popular` },
+      { name: "mostFavorite", url: `${BASE_URL}/most-favorite` },
+      { name: "latestCompleted", url: `${BASE_URL}/completed` },
+      { name: "topUpcoming", url: `${BASE_URL}/top-upcoming` },
+      { name: "subbedAnime", url: `${BASE_URL}/subbed-anime` },
+      { name: "dubbedAnime", url: `${BASE_URL}/dubbed-anime` },
+      { name: "azList1", url: `${BASE_URL}/az-list?page=1` },
+      { name: "azList2", url: `${BASE_URL}/az-list?page=2` }
+    ];
+
+    for (const cat of targetCategories) {
+      try {
+        logSync(`Scraping category "${cat.name}" from ${cat.url}...`);
+        const res = await fetch(cat.url, {
+          headers: { "User-Agent": UA, Accept: "text/html,*/*" },
+          signal: AbortSignal.timeout(10000)
+        });
+
+        if (res.ok) {
+          const html = await res.text();
+          const items = parseHiAnimeCards(html, cat.name);
+          categoriesData[cat.name] = items;
+          items.forEach(a => allAnimeMap.set(String(a.id), a));
+          logSync(`Scraped ${items.length} anime from "${cat.name}".`);
+        }
+      } catch (err) {
+        logSync(`Warning: Category "${cat.name}" fetch failed: ${err.message}`);
+      }
+    }
+
+    // 3. Update sync state data structures
+    if (categoriesData.latestEpisodes && categoriesData.latestEpisodes.length > 0) {
+      syncState.data.latestEpisodes = categoriesData.latestEpisodes;
+    }
+    if (categoriesData.topAiring && categoriesData.topAiring.length > 0) {
+      syncState.data.topAiring = categoriesData.topAiring;
+    }
+    if (categoriesData.mostPopular && categoriesData.mostPopular.length > 0) {
+      syncState.data.mostPopular = categoriesData.mostPopular;
+    }
+    if (categoriesData.mostFavorite && categoriesData.mostFavorite.length > 0) {
+      syncState.data.mostFavorite = categoriesData.mostFavorite;
+    }
+    if (categoriesData.latestCompleted && categoriesData.latestCompleted.length > 0) {
+      syncState.data.latestCompleted = categoriesData.latestCompleted;
+    }
+    if (categoriesData.topUpcoming && categoriesData.topUpcoming.length > 0) {
+      syncState.data.topUpcoming = categoriesData.topUpcoming;
+    }
+
+    syncState.data.categories = categoriesData;
+    syncState.data.allAnime = Array.from(allAnimeMap.values());
+    syncState.totalAnimeCount = syncState.data.allAnime.length;
+    syncState.lastSyncTime = Date.now();
+    syncState.nextSyncTime = syncState.lastSyncTime + SYNC_INTERVAL_MS;
+
+    logSync(`✅ HiAnime Sync Success! Total unique anime cached: ${syncState.totalAnimeCount}`);
+
+    // 4. Save to Persistent Cache File
+    try {
+      if (!existsSync(DATA_DIR)) {
+        mkdirSync(DATA_DIR, { recursive: true });
+      }
+      writeFileSync(CACHE_FILE, JSON.stringify(syncState, null, 2), "utf8");
+      logSync(`Saved synced payload to ${CACHE_FILE}`);
+    } catch (saveErr) {
+      logSync(`Warning: Failed to save disk cache: ${saveErr.message}`);
+    }
+
+  } catch (err) {
+    syncState.lastError = err.message;
+    logSync(`❌ HiAnime Sync Error: ${err.message}`);
+  } finally {
+    syncState.isSyncing = false;
+  }
+
+  return syncState;
+}
+
+// Load cached data from disk on initial boot
+export function initHiAnimeSyncEngine() {
+  try {
+    if (existsSync(CACHE_FILE)) {
+      const raw = readFileSync(CACHE_FILE, "utf8");
+      const saved = JSON.parse(raw);
+      if (saved && saved.data && saved.data.allAnime && saved.data.allAnime.length > 0) {
+        syncState = {
+          ...syncState,
+          lastSyncTime: saved.lastSyncTime || Date.now(),
+          nextSyncTime: (saved.lastSyncTime || Date.now()) + SYNC_INTERVAL_MS,
+          totalAnimeCount: saved.totalAnimeCount || saved.data.allAnime.length,
+          data: saved.data
+        };
+        logSync(`Loaded ${syncState.totalAnimeCount} cached HiAnime items from disk.`);
+      }
+    }
+  } catch (err) {
+    logSync(`No previous disk cache loaded: ${err.message}`);
+  }
+
+  // Trigger immediate initial sync if never synced or cache is older than 6 hours
+  const isStale = !syncState.lastSyncTime || Date.now() - syncState.lastSyncTime > SYNC_INTERVAL_MS;
+  if (isStale || syncState.totalAnimeCount === 0) {
+    logSync("Initial stale cache detected. Initiating background sync...");
+    runHiAnimeSync();
+  } else {
+    logSync(`Cache is fresh (synced ${Math.round((Date.now() - syncState.lastSyncTime) / 60000)} mins ago).`);
+  }
+
+  // Set recurring timer every 6 hours
+  setInterval(() => {
+    logSync("6-hour sync timer fired. Executing automatic HiAnime update...");
+    runHiAnimeSync();
+  }, SYNC_INTERVAL_MS);
+
+  logSync(`Scheduled recurring HiAnime auto-sync every 6 hours (${SYNC_INTERVAL_MS}ms).`);
+}
+
+// Getters for Router & Frontend
+export function getSyncedHiAnimeData() {
+  return syncState;
+}
+
+export function searchSyncedAnime(query) {
+  if (!query || typeof query !== "string") return [];
+  const q = query.trim().toLowerCase();
+  const all = syncState.data.allAnime || [];
+  return all.filter(a => {
+    const tEng = (a.title?.english || "").toLowerCase();
+    const tRom = (a.title?.romaji || "").toLowerCase();
+    const tStr = (a.titleStr || "").toLowerCase();
+    return tEng.includes(q) || tRom.includes(q) || tStr.includes(q);
+  });
+}
+
+export function getSyncedAnimeByLetter(char) {
+  const all = syncState.data.allAnime || [];
+  if (char === "All") return all;
+  if (char === "0-9") {
+    return all.filter(a => /^[0-9]/.test((a.titleStr || "").trim()));
+  }
+  const lower = char.toLowerCase();
+  return all.filter(a => (a.titleStr || "").trim().toLowerCase().startsWith(lower));
+}

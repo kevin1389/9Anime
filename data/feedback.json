@@ -1,0 +1,26 @@
+[
+  {
+    "id": "rep_1790479597024_8u085",
+    "animeId": "",
+    "animeTitle": "One Piece",
+    "episode": 1,
+    "issueType": "missing_episode",
+    "description": "Please check episode 1 for One Piece",
+    "userContact": "user@animoon.app",
+    "createdAt": 1790479597024,
+    "status": "resolved",
+    "resolvedAt": 1790479597544,
+    "resolutionNote": "Auto-resolved & fixed: Flushed caches and re-indexed fresh episode streams directly from HiAnime.at for 'One Piece'!"
+  },
+  {
+    "id": "rep_1790477998554_vb6ck",
+    "animeId": "",
+    "animeTitle": "One Piece",
+    "episode": 1120,
+    "issueType": "missing_episode",
+    "description": "Please let us know if something is missing or wrong — Episode 1120 needs verification!",
+    "userContact": "test@example.com",
+    "createdAt": 1790477998555,
+    "status": "open"
+  }
+]
