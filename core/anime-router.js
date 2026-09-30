@@ -681,8 +681,8 @@ export async function handleAnimeApi(req, res) {
                       }));
 
                       const srvName = streams.length === 0
-                        ? `AniMoon Direct 1080p ⚡ (${srv.type.toUpperCase()})`
-                        : `AniMoon Ultra HD 1080p ⚡ (${srv.type.toUpperCase()})`;
+                        ? `9Anime Direct 1080p ⚡ (${srv.type.toUpperCase()})`
+                        : `9Anime Ultra HD 1080p ⚡ (${srv.type.toUpperCase()})`;
 
                       streams.push({
                         server: srvName,
@@ -713,7 +713,7 @@ export async function handleAnimeApi(req, res) {
                   const isExisting = streams.some(s => s.rawUrl === srv.rawUrl || s.embedUrl === srv.rawUrl);
                   if (!isExisting) {
                     streams.push({
-                      server: `AniMoon Mirror Player ⚡ (${srv.type.toUpperCase()})`,
+                      server: `9Anime Mirror Player ⚡ (${srv.type.toUpperCase()})`,
                       type: "embed",
                       embedUrl: srv.rawUrl,
                       url: "",
@@ -746,7 +746,7 @@ export async function handleAnimeApi(req, res) {
       // If 0 servers were extracted, provide working fail-safe servers for this exact anime & episode
       if (streams.length === 0) {
         streams.push({
-          server: `AniMoon Direct Player ⚡ (${effectiveMode.toUpperCase()})`,
+          server: `9Anime Direct Player ⚡ (${effectiveMode.toUpperCase()})`,
           type: "embed",
           embedUrl: `https://vidsrc.cc/v2/embed/anime/${id}/${ep}/${effectiveMode}`,
           url: "",
@@ -762,7 +762,7 @@ export async function handleAnimeApi(req, res) {
           audioLang: effectiveMode === "dub" ? "en" : "ja"
         });
         streams.push({
-          server: `AniMoon Mirror Player ⚡ (${effectiveMode.toUpperCase()})`,
+          server: `9Anime Mirror Player ⚡ (${effectiveMode.toUpperCase()})`,
           type: "embed",
           embedUrl: `https://2embed.cc/embed/anime/${id}/${ep}`,
           url: "",
@@ -782,7 +782,7 @@ export async function handleAnimeApi(req, res) {
         const first = streams[0];
         if (first.type === "hls") {
           streams.push({
-            server: `AniMoon Ultra HD 1080p ⚡ (${effectiveMode.toUpperCase()})`,
+            server: `9Anime Ultra HD 1080p ⚡ (${effectiveMode.toUpperCase()})`,
             type: "hls",
             url: first.url,
             rawUrl: first.rawUrl,
@@ -792,7 +792,7 @@ export async function handleAnimeApi(req, res) {
           });
         } else {
           streams.push({
-            server: `AniMoon Backup Mirror ⚡ (${effectiveMode.toUpperCase()})`,
+            server: `9Anime Backup Mirror ⚡ (${effectiveMode.toUpperCase()})`,
             type: "embed",
             embedUrl: `https://2embed.cc/embed/anime/${id}/${ep}`,
             url: "",
@@ -809,7 +809,7 @@ export async function handleAnimeApi(req, res) {
           let pts = 0;
           if (s.audioMode === audioMode) pts += 500;
           if (s.type === "hls") pts += 200;
-          if (s.server.includes("AniMoon Direct")) pts += 100;
+          if (s.server.includes("9Anime Direct")) pts += 100;
           return pts;
         };
         return score(b) - score(a);

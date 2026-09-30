@@ -100,6 +100,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`AniMoon dev server → http://0.0.0.0:${PORT}`);
+  console.log(`99Anime dev server → http://0.0.0.0:${PORT}`);
   initHiAnimeSyncEngine();
 });

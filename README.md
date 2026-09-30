@@ -4,7 +4,7 @@
 <img src="docs/logo.svg" width="80" height="80"/>
 
 
-# AniMoon API 2.2.1
+# 99Anime API 2.2.1
 
 **Anime streaming aggregator API — one endpoint, all your sources.**
 
@@ -20,7 +20,7 @@
 
 A single API that aggregates anime episode lists and streaming links from multiple providers. Give it an AniList ID, get back everything — episodes, sources, and stream URLs — all in one place.
 
-It's the backbone powering **[AniMoon](https://github.com/walterwhite-69/Anivexa)**, a full anime streaming client built on top of this.
+It's the backbone powering **[99Anime](https://github.com/walterwhite-69/Anivexa)**, a full anime streaming client built on top of this.
 
 ## Notice!
 ***This API intentionally uses AniList as its catalog and identity layer. When AniList is unavailable, the API may be partially unavailable or unstable as well. If you do not want an AniList-backed catalog, this simply is not the API for your use case!. So dont bother using it.***

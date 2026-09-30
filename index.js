@@ -270,7 +270,7 @@ export default {
     }
 
     return json({
-      name: "AniMoon API 2.2.1",
+      name: "99Anime API 2.2.1",
       cache: _CACHE_ENABLED,
       providers: [
         "mkissa",

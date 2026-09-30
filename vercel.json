@@ -1,0 +1,41 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/home",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/watch/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/episodes/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/stream/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/map/(.*)",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/app",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/((?!api/|watch/|episodes/|stream/|map/|home).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
