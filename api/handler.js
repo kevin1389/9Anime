@@ -1,5 +1,3 @@
-import worker from "../index.js";
+import handler from "./index.js";
 
-export const config = { runtime: "edge" };
-
-export default (request) => worker.fetch(request, {});
+export default handler;

@@ -81,6 +81,51 @@ export default {
       });
     }
 
+    // Serve 99Anime Frontend UI for Web Routes
+    if (
+      path === "/" ||
+      path === "" ||
+      path === "/index.html" ||
+      path === "/app" ||
+      path === "/home"
+    ) {
+      try {
+        const fs = await import("fs");
+        const p = await import("path");
+        const filePath = p.join(process.cwd(), "public", "index.html");
+        if (fs.existsSync(filePath)) {
+          const html = fs.readFileSync(filePath, "utf8");
+          return new Response(html, {
+            status: 200,
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Cache-Control": "public, max-age=0, must-revalidate",
+            },
+          });
+        }
+      } catch (e) {
+        console.error("Static serve error:", e);
+      }
+    }
+
+    if (path === "/logo.svg") {
+      try {
+        const fs = await import("fs");
+        const p = await import("path");
+        const filePath = p.join(process.cwd(), "public", "logo.svg");
+        if (fs.existsSync(filePath)) {
+          const svg = fs.readFileSync(filePath, "utf8");
+          return new Response(svg, {
+            status: 200,
+            headers: {
+              "Content-Type": "image/svg+xml",
+              "Cache-Control": "public, max-age=86400",
+            },
+          });
+        }
+      } catch (e) {}
+    }
+
     let m = path.match(/^\/map\/(\d+)\/?$/);
     if (m) {
       const anilistId = m[1];
@@ -269,45 +314,66 @@ export default {
       );
     }
 
-    return json({
-      name: "99Anime API 2.2.1",
-      cache: _CACHE_ENABLED,
-      providers: [
-        "mkissa",
-        "reanime",
-        "anikoto",
-        "animegg",
-        "anineko",
-        "anidbapp",
-        "animenosub",
-        "anizone",
-        "aniwaves",
-        "anibd",
-        "senshi",
-        "kaa",
-        "animedunya",
-        "animeonsen",
-      ],
-      routes: [
-        "/map/:anilistId",
-        "/episodes/:anilistId",
-        "/episodes/:provider[/:provider...]/:anilistId?map=true|false",
-        "/watch/mkissa/:id/sub|dub/mkissa-:ep",
-        "/watch/reanime/:id/sub|dub/reanime-:ep",
-        "/stream/reanime/:id/sub|dub/:ep",
-        "/watch/anikoto/:id/sub|dub/anikoto-:ep",
-        "/watch/animegg/:id/sub|dub/animegg-:ep",
-        "/watch/anineko/:id/sub|dub/anineko-:ep",
-        "/watch/anidbapp/:id/sub|dub/anidbapp-:ep",
-        "/watch/animenosub/:id/sub|dub/animenosub-:ep",
-        "/watch/anizone/:id/sub|dub/anizone-:ep",
-        "/watch/aniwaves/:id/sub|dub/aniwaves-:ep",
-        "/watch/anibd/:id/sub|dub/anibd-:ep",
-        "/watch/senshi/:id/sub|dub/senshi-:ep",
-        "/watch/kaa/:id/sub|dub/kaa-:ep",
-        "/watch/animedunya/:id/sub|dub/animedunya-:ep",
-        "/watch/animeonsen/:id/sub|dub/animeonsen-:ep",
-      ],
-    });
+    if (path === "/api" || path === "/api/" || path === "/api/docs" || path === "/api/raw") {
+      return json({
+        name: "99Anime API 2.2.1",
+        cache: _CACHE_ENABLED,
+        providers: [
+          "mkissa",
+          "reanime",
+          "anikoto",
+          "animegg",
+          "anineko",
+          "anidbapp",
+          "animenosub",
+          "anizone",
+          "aniwaves",
+          "anibd",
+          "senshi",
+          "kaa",
+          "animedunya",
+          "animeonsen",
+        ],
+        routes: [
+          "/map/:anilistId",
+          "/episodes/:anilistId",
+          "/episodes/:provider[/:provider...]/:anilistId?map=true|false",
+          "/watch/mkissa/:id/sub|dub/mkissa-:ep",
+          "/watch/reanime/:id/sub|dub/reanime-:ep",
+          "/stream/reanime/:id/sub|dub/:ep",
+          "/watch/anikoto/:id/sub|dub/anikoto-:ep",
+          "/watch/animegg/:id/sub|dub/animegg-:ep",
+          "/watch/anineko/:id/sub|dub/anineko-:ep",
+          "/watch/anidbapp/:id/sub|dub/anidbapp-:ep",
+          "/watch/animenosub/:id/sub|dub/animenosub-:ep",
+          "/watch/anizone/:id/sub|dub/anizone-:ep",
+          "/watch/aniwaves/:id/sub|dub/aniwaves-:ep",
+          "/watch/anibd/:id/sub|dub/anibd-:ep",
+          "/watch/senshi/:id/sub|dub/senshi-:ep",
+          "/watch/kaa/:id/sub|dub/kaa-:ep",
+          "/watch/animedunya/:id/sub|dub/animedunya-:ep",
+          "/watch/animeonsen/:id/sub|dub/animeonsen-:ep",
+        ],
+      });
+    }
+
+    // Default: Serve 99Anime streaming web app
+    try {
+      const fs = await import("fs");
+      const p = await import("path");
+      const filePath = p.join(process.cwd(), "public", "index.html");
+      if (fs.existsSync(filePath)) {
+        const html = fs.readFileSync(filePath, "utf8");
+        return new Response(html, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, max-age=0, must-revalidate",
+          },
+        });
+      }
+    } catch (e) {}
+
+    return new Response("Not Found", { status: 404 });
   },
 };
