@@ -70,11 +70,12 @@ const server = http.createServer(async (req, res) => {
     return serveStatic(req, res, staticEntry);
   }
 
-  // Handle Anime Frontend, HiAnime API, and Feedback routes
+  // Handle Anime Frontend, HiAnime API, User Auth/Sync, and Feedback routes
   if (
     pathname.startsWith("/api/anime/") ||
     pathname.startsWith("/api/hianime/") ||
     pathname.startsWith("/api/feedback/") ||
+    pathname.startsWith("/api/user/") ||
     pathname === "/home" ||
     pathname === "/api/home"
   ) {

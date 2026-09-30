@@ -11,5 +11,8 @@ service cloud.firestore {
       allow create: if true;
       allow read: if true;
     }
+    match /test/{docId} {
+      allow read, write: if true;
+    }
   }
 }

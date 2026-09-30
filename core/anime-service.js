@@ -75,7 +75,7 @@ export const FEATURED_ANIME = [
   },
   {
     id: 21,
-    hianimeId: "100",
+    hianimeId: "1",
     title: { english: "One Piece", romaji: "ONE PIECE" },
     coverImage: {
       extraLarge: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg",

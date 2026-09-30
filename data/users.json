@@ -1,0 +1,24 @@
+{
+  "tester@animoon.me": {
+    "uid": "user_7465737465724061",
+    "email": "tester@animoon.me",
+    "password": "password123",
+    "createdAt": 1790805681011,
+    "updatedAt": 1790805681012,
+    "watchProgress": {
+      "21": {
+        "episode": 5,
+        "time": 240,
+        "duration": 1440,
+        "completed": false,
+        "updatedAt": 1790805680903
+      }
+    },
+    "watchlist": {
+      "21": {
+        "id": 21,
+        "title": "One Piece"
+      }
+    }
+  }
+}

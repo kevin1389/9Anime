@@ -4,6 +4,7 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { searchHiAnime, getHiAnimeEpisodes, browseHiAnime } from "./hianime-service.js";
+import { FEATURED_ANIME } from "./anime-service.js";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dir, "..", "data");
@@ -104,9 +105,22 @@ function parseHiAnimeCards(html, categoryName = "general") {
 
       if (id && (titleEnglish || titleJname)) {
         const displayTitle = titleEnglish || titleJname;
+        const cleanDisplay = displayTitle.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+        // STRICT EXACT MATCH ONLY to avoid wrong show/season mapping
+        const matchedFeatured = FEATURED_ANIME.find(f => {
+          const fEnglish = (f.title?.english || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+          const fRomaji = (f.title?.romaji || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+          return cleanDisplay && (cleanDisplay === fEnglish || cleanDisplay === fRomaji);
+        });
+
+        // Always keep the real HiAnime card poster; fallback only if empty
+        const finalPoster = posterUrl || matchedFeatured?.coverImage?.extraLarge || matchedFeatured?.coverImage?.large || "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg";
+        const resolvedId = id || matchedFeatured?.hianimeId;
+
         items.push({
-          id: Number(id) || id,
-          hianimeId: String(id),
+          id: Number(resolvedId) || resolvedId,
+          hianimeId: String(resolvedId),
           title: {
             english: displayTitle,
             romaji: titleJname || displayTitle,
@@ -114,11 +128,12 @@ function parseHiAnimeCards(html, categoryName = "general") {
           },
           titleStr: displayTitle,
           coverImage: {
-            extraLarge: posterUrl,
-            large: posterUrl,
-            medium: posterUrl
+            extraLarge: finalPoster,
+            large: finalPoster,
+            medium: finalPoster
           },
-          poster: posterUrl,
+          poster: finalPoster,
+          bannerImage: matchedFeatured?.bannerImage || finalPoster,
           episodes: totalEps,
           subCount: subCount || totalEps,
           dubCount: dubCount,
@@ -160,7 +175,6 @@ function parseHiAnimeSpotlights(html) {
       const watchMatch = slide.match(/href="([^"]+)"[^>]*class="[^"]*btn-slide-watch[^"]*"/) || slide.match(/href="([^"]+)"/);
       const formatMatch = slide.match(/<i class="fas fa-play-circle mr-1"><\/i>([^<]+)/);
       const durationMatch = slide.match(/<i class="fas fa-clock mr-1"><\/i>([^<]+)/);
-      const dateMatch = slide.match(/<i class="fas fa-calendar mr-1"><\/i>([^<]+)/);
       const subMatch = slide.match(/tick-sub[^>]*>[\s\S]*?(\d+)\s*<\/div>/);
       const dubMatch = slide.match(/tick-dub[^>]*>[\s\S]*?(\d+)\s*<\/div>/);
 
@@ -171,24 +185,36 @@ function parseHiAnimeSpotlights(html) {
       const displayTitle = english || jname;
       const desc = descMatch ? decodeEntities(descMatch[1].replace(/<[^>]*>/g, "").trim()) : "";
       const watchUrl = watchMatch ? watchMatch[1].trim() : "";
-      const idMatch = watchUrl.match(/-(\d+)$/);
-      const id = idMatch ? idMatch[1] : (1000 + i);
+      const cleanUrl = (watchUrl || "").split("?")[0].replace(/\/$/, "");
+      const idMatch = cleanUrl.match(/-(\d+)$/) || cleanUrl.match(/\/(\d+)$/) || slide.match(/data-id="(\d+)"/);
+
+      const cleanDisplay = displayTitle.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const matchedFeatured = FEATURED_ANIME.find(f => {
+        const fEnglish = (f.title?.english || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        const fRomaji = (f.title?.romaji || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        return cleanDisplay && (cleanDisplay === fEnglish || cleanDisplay === fRomaji);
+      });
+
+      const id = idMatch ? idMatch[1] : (matchedFeatured?.hianimeId || matchedFeatured?.id);
+      if (!id) continue;
+
+      const finalPoster = banner || matchedFeatured?.coverImage?.extraLarge || matchedFeatured?.bannerImage || "";
 
       const subCount = subMatch ? parseInt(subMatch[1], 10) : 24;
       const dubCount = dubMatch ? parseInt(dubMatch[1], 10) : 0;
       const format = formatMatch ? decodeEntities(formatMatch[1]).trim() : "TV";
       const duration = durationMatch ? decodeEntities(durationMatch[1]).trim() : "24m";
 
-      if (displayTitle && banner) {
+      if (displayTitle && (finalPoster || banner)) {
         spotlights.push({
           id: Number(id) || id,
           hianimeId: String(id),
           rank,
           title: { english: displayTitle, romaji: jname || displayTitle, userPreferred: displayTitle },
           titleStr: displayTitle,
-          bannerImage: banner,
-          coverImage: { extraLarge: banner, large: banner, medium: banner },
-          poster: banner,
+          bannerImage: finalPoster || banner,
+          coverImage: { extraLarge: finalPoster, large: finalPoster, medium: finalPoster },
+          poster: finalPoster,
           description: desc,
           format: format,
           duration: duration,
@@ -222,19 +248,44 @@ function parseHiAnimeTrending(html) {
     try {
       const slide = slides[i];
       const numMatch = slide.match(/class="number"[\s\S]*?<span>(\d+)<\/span>/);
-      const titleMatch = slide.match(/class="film-title dynamic-name"[^>]*data-jname="([^"]*)"[^>]*>([\s\S]*?)<\/div>/);
-      const hrefMatch = slide.match(/class="film-poster"[^>]*href="([^"]+)"/);
+      const titleMatch = slide.match(/class="film-title dynamic-name"[^>]*data-jname="([^"]*)"[^>]*>([\s\S]*?)<\/div>/) ||
+                         slide.match(/class="film-title dynamic-name"[^>]*>([\s\S]*?)<\/div>/);
+      // Look for href in the slide (href is placed before class="film-poster" in HiAnime HTML)
+      const hrefMatch = slide.match(/href="([^"]+)"/);
       const imgMatch = slide.match(/<img [^>]*src="([^"]+)"/);
 
       if (numMatch && (titleMatch || hrefMatch)) {
         const rank = parseInt(numMatch[1], 10);
-        const jname = titleMatch ? decodeEntities(titleMatch[1].trim()) : "";
-        const english = titleMatch ? decodeEntities(titleMatch[2].replace(/<[^>]*>/g, "").trim()) : "";
+        let jname = "";
+        let english = "";
+        if (titleMatch) {
+          if (titleMatch.length >= 3) {
+            jname = decodeEntities(titleMatch[1].trim());
+            english = decodeEntities(titleMatch[2].replace(/<[^>]*>/g, "").trim());
+          } else {
+            english = decodeEntities(titleMatch[1].replace(/<[^>]*>/g, "").trim());
+          }
+        }
         const displayTitle = english || jname;
         const watchUrl = hrefMatch ? hrefMatch[1].trim() : "";
         const poster = imgMatch ? imgMatch[1].trim() : "";
-        const idMatch = watchUrl.match(/-(\d+)$/);
-        const id = idMatch ? idMatch[1] : (2000 + rank);
+        const cleanUrl = (watchUrl || "").split("?")[0].replace(/\/$/, "");
+        const idMatch = cleanUrl.match(/-(\d+)$/) || cleanUrl.match(/\/(\d+)$/) || slide.match(/data-id="(\d+)"/);
+
+        // Match against verified catalog using STRICT exact match only
+        const cleanDisplay = displayTitle.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const matchedFeatured = FEATURED_ANIME.find(f => {
+          const fEnglish = (f.title?.english || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+          const fRomaji = (f.title?.romaji || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+          return cleanDisplay && (cleanDisplay === fEnglish || cleanDisplay === fRomaji);
+        });
+
+        // Always prioritize the real HiAnime ID from the URL
+        const id = idMatch ? idMatch[1] : (matchedFeatured?.hianimeId || matchedFeatured?.id);
+        if (!id) continue;
+
+        // Use the real poster from HiAnime
+        const finalPoster = poster || matchedFeatured?.coverImage?.extraLarge || matchedFeatured?.coverImage?.large || "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg";
 
         trending.push({
           id: Number(id) || id,
@@ -242,9 +293,9 @@ function parseHiAnimeTrending(html) {
           rank,
           title: { english: displayTitle, romaji: jname || displayTitle, userPreferred: displayTitle },
           titleStr: displayTitle,
-          coverImage: { extraLarge: poster, large: poster, medium: poster },
-          poster: poster,
-          bannerImage: poster,
+          coverImage: { extraLarge: finalPoster, large: finalPoster, medium: finalPoster },
+          poster: finalPoster,
+          bannerImage: matchedFeatured?.bannerImage || finalPoster,
           format: "TV",
           episodes: 24,
           subCount: 24,
@@ -321,8 +372,14 @@ export async function runHiAnimeSync() {
       { name: "topUpcoming", url: `${BASE_URL}/top-upcoming` },
       { name: "subbedAnime", url: `${BASE_URL}/subbed-anime` },
       { name: "dubbedAnime", url: `${BASE_URL}/dubbed-anime` },
+      { name: "movies", url: `${BASE_URL}/movie` },
+      { name: "tvSeries", url: `${BASE_URL}/tv` },
+      { name: "recentlyAdded", url: `${BASE_URL}/recently-added` },
       { name: "azList1", url: `${BASE_URL}/az-list?page=1` },
-      { name: "azList2", url: `${BASE_URL}/az-list?page=2` }
+      { name: "azList2", url: `${BASE_URL}/az-list?page=2` },
+      { name: "azList3", url: `${BASE_URL}/az-list?page=3` },
+      { name: "azList4", url: `${BASE_URL}/az-list?page=4` },
+      { name: "azList5", url: `${BASE_URL}/az-list?page=5` }
     ];
 
     for (const cat of targetCategories) {

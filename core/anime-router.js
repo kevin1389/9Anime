@@ -6,6 +6,7 @@ import { searchHiAnime, browseHiAnime, getHiAnimeEpisodes, getAnimeWithEpisodes,
 import { getSyncedHiAnimeData, runHiAnimeSync, searchSyncedAnime, getSyncedAnimeByLetter } from "./hianime-sync.js";
 import anikotoHandler, { getEpisodes as getAnikotoEpisodes } from "../providers/anikoto.js";
 import { extractMegaPlayDetails, canExtractMegaPlay } from "../extractors/megaplay.js";
+import { authenticateUser, getUserData, saveUserData } from "./user-service.js";
 
 // Smart Anime Title Selector - Ensures exact series & season matching (never picks wrong anime/spin-off)
 function selectBestAnimeMatch(targetTitle, results) {
@@ -157,42 +158,7 @@ export async function handleAnimeApi(req, res) {
 
     const trendingSource = (syncedData.trending && syncedData.trending.length > 0)
       ? syncedData.trending
-      : [
-          {
-            id: 21,
-            title: { english: "One Piece", romaji: "One Piece" },
-            coverImage: { extraLarge: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-YCDoj1EkAxFn.jpg", large: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21-YCDoj1EkAxFn.jpg" },
-            episodes: 1120
-          },
-          {
-            id: 108465,
-            title: { english: "Mushoku Tensei: Jobless Reincarnation", romaji: "Mushoku Tensei: Isekai Ittara Honki Dasu" },
-            coverImage: { extraLarge: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx108465-trh9WPsso5A7.jpg", large: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx108465-trh9WPsso5A7.jpg" },
-            episodes: 24
-          },
-          {
-            id: 101280,
-            title: { english: "That Time I Got Reincarnated as a Slime", romaji: "Tensei Shitara Slime Datta Ken" },
-            coverImage: { extraLarge: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101280-I2Fq05jQk347.jpg", large: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx101280-I2Fq05jQk347.jpg" },
-            episodes: 24
-          },
-          {
-            id: 114446,
-            title: { english: "Bleach: Thousand-Year Blood War", romaji: "BLEACH: Sennen Kessen-hen" },
-            coverImage: { extraLarge: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx114446-24jAieBqjAOU.jpg", large: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx114446-24jAieBqjAOU.jpg" },
-            episodes: 13
-          },
-          {
-            id: 21355,
-            title: { english: "Re:ZERO -Starting Life in Another World-", romaji: "Re:Zero kara Hajimeru Isekai Seikatsu" },
-            coverImage: { extraLarge: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21355-m9sczs5nBwTC.jpg", large: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21355-m9sczs5nBwTC.jpg" },
-            episodes: 25
-          },
-          FEATURED_ANIME.find(a => a.id === 180219) || FEATURED_ANIME[18],
-          FEATURED_ANIME.find(a => a.id === 151807) || FEATURED_ANIME[1],
-          FEATURED_ANIME.find(a => a.id === 101922) || FEATURED_ANIME[2],
-          FEATURED_ANIME.find(a => a.id === 113415) || FEATURED_ANIME[3]
-        ].filter(Boolean);
+      : FEATURED_ANIME.slice(0, 12);
 
     const trending = trendingSource.map((anime, index) => ({
       ...anime,
@@ -388,6 +354,22 @@ export async function handleAnimeApi(req, res) {
       return res.end(JSON.stringify({ error: "Missing anime id" }));
     }
     try {
+      // 1. Check FEATURED_ANIME by AniList ID or HiAnime ID
+      const featured = FEATURED_ANIME.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id));
+      if (featured) {
+        res.statusCode = 200;
+        return res.end(JSON.stringify({ anime: featured }));
+      }
+
+      // 2. Check synced HiAnime catalog
+      const synced = getSyncedHiAnimeData()?.data?.allAnime || [];
+      const matchedSynced = synced.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id));
+      if (matchedSynced) {
+        res.statusCode = 200;
+        return res.end(JSON.stringify({ anime: matchedSynced }));
+      }
+
+      // 3. Fallback to AniList by ID
       const anime = await getAnimeById(id);
       res.statusCode = 200;
       return res.end(JSON.stringify({ anime }));
@@ -397,7 +379,7 @@ export async function handleAnimeApi(req, res) {
     }
   }
 
-  // 3.5. Comprehensive Episode List Endpoint (HiAnime + Anikoto Direct Sync)
+  // 3.5. Comprehensive Episode List Endpoint (HiAnime Direct Sync)
   if (pathname === "/api/anime/episodes") {
     const id = url.searchParams.get("id");
     if (!id) {
@@ -415,31 +397,40 @@ export async function handleAnimeApi(req, res) {
     }
 
     try {
-      let hiEpisodes = [];
-      const animeObj = await getAnimeById(id).catch(() => null);
-      const titleToSearch = animeObj ? (animeObj.title?.english || animeObj.title?.romaji || (typeof animeObj.title === "string" ? animeObj.title : "")) : "";
+      let hiAnimeId = String(id);
+      let titleToSearch = "";
 
-      // 1. Try fetching direct HiAnime episodes
+      const featured = FEATURED_ANIME.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id));
+      const syncedCatalog = getSyncedHiAnimeData()?.data?.allAnime || [];
+      const matchedSynced = syncedCatalog.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id));
+
+      if (featured) {
+        hiAnimeId = String(featured.hianimeId || featured.id);
+        titleToSearch = featured.title?.english || featured.title?.romaji || "";
+      } else if (matchedSynced) {
+        hiAnimeId = String(matchedSynced.hianimeId || matchedSynced.id);
+        titleToSearch = matchedSynced.title?.english || matchedSynced.title?.romaji || matchedSynced.titleStr || "";
+      } else {
+        const animeObj = await getAnimeById(id).catch(() => null);
+        if (animeObj) {
+          titleToSearch = typeof animeObj.title === "string" ? animeObj.title : (animeObj.title?.english || animeObj.title?.romaji || "");
+        }
+      }
+
+      let hiEpisodes = [];
       try {
-        hiEpisodes = await getHiAnimeEpisodes(id);
+        hiEpisodes = await getHiAnimeEpisodes(hiAnimeId);
         if ((!hiEpisodes || hiEpisodes.length === 0) && titleToSearch) {
-          const hiData = await getAnimeWithEpisodes(titleToSearch);
-          if (hiData && Array.isArray(hiData.episodes) && hiData.episodes.length > 0) {
-            hiEpisodes = hiData.episodes;
+          const hiSearchResults = await searchHiAnime(titleToSearch).catch(() => []);
+          const bestMatch = selectBestAnimeMatch(titleToSearch, hiSearchResults);
+          if (bestMatch && bestMatch.id) {
+            hiAnimeId = String(bestMatch.id);
+            hiEpisodes = await getHiAnimeEpisodes(hiAnimeId);
           }
         }
       } catch (hiErr) {
         console.warn(`HiAnime episode fetch warning for ${id}:`, hiErr.message);
       }
-
-      // 2. Also try Anikoto provider
-      let anikotoSub = [];
-      let anikotoDub = [];
-      try {
-        const aniData = await getAnikotoEpisodes(Number(id));
-        anikotoSub = aniData?.episodes?.sub || [];
-        anikotoDub = aniData?.episodes?.dub || [];
-      } catch (aniErr) {}
 
       // Formulate complete, verified episode list
       let finalSubList = [];
@@ -455,37 +446,33 @@ export async function handleAnimeApi(req, res) {
           audio: "sub"
         }));
 
-        const dubCount = animeObj?.dubCount !== undefined ? animeObj.dubCount : (hiEpisodes.length);
-        finalDubList = dubCount > 0 ? hiEpisodes.slice(0, dubCount).map(ep => ({
+        finalDubList = hiEpisodes.map(ep => ({
           number: ep.episode,
           title: ep.title || `Episode ${ep.episode}`,
           id: ep.episodeId || `ep-${ep.episode}`,
           episodeId: ep.episodeId,
           url: ep.url,
           audio: "dub"
-        })) : [];
-      } else if (anikotoSub.length > 0 || anikotoDub.length > 0) {
-        finalSubList = anikotoSub;
-        finalDubList = anikotoDub;
+        }));
       } else {
-        const epCount = animeObj?.episodes || 24;
+        const epCount = 24;
         finalSubList = Array.from({ length: epCount }, (_, i) => ({
           number: i + 1,
           title: `Episode ${i + 1}`,
-          id: `watch/anikoto/${id}/sub/anikoto-${i + 1}`,
+          id: `ep-${i + 1}`,
           audio: "sub"
         }));
-        finalDubList = (animeObj?.dubCount || 0) > 0 ? Array.from({ length: animeObj.dubCount }, (_, i) => ({
+        finalDubList = Array.from({ length: epCount }, (_, i) => ({
           number: i + 1,
           title: `Episode ${i + 1}`,
-          id: `watch/anikoto/${id}/dub/anikoto-${i + 1}`,
+          id: `ep-${i + 1}`,
           audio: "dub"
-        })) : [];
+        }));
       }
 
       const payload = {
         anilistId: Number(id) || id,
-        animeTitle: titleToSearch || (animeObj ? animeObj.title : ""),
+        animeTitle: titleToSearch,
         totalSub: finalSubList.length,
         totalDub: finalDubList.length,
         totalEpisodes: Math.max(finalSubList.length, finalDubList.length),
@@ -550,22 +537,25 @@ export async function handleAnimeApi(req, res) {
       let titleToSearch = "";
       let hiAnimeId = String(id);
 
+      const featured = FEATURED_ANIME.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id));
       const syncedCatalog = getSyncedHiAnimeData()?.data?.allAnime || [];
       const matchedSynced = syncedCatalog.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id));
-      const animeObj = (await getAnimeById(Number(id))) || FEATURED_ANIME.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id));
 
-      if (matchedSynced && matchedSynced.hianimeId) {
-        hiAnimeId = String(matchedSynced.hianimeId);
+      if (featured) {
+        hiAnimeId = String(featured.hianimeId || featured.id);
+        titleToSearch = featured.title?.english || featured.title?.romaji || "";
+      } else if (matchedSynced) {
+        hiAnimeId = String(matchedSynced.hianimeId || matchedSynced.id);
         titleToSearch = matchedSynced.title?.english || matchedSynced.title?.romaji || matchedSynced.titleStr || "";
-      } else if (animeObj && animeObj.hianimeId) {
-        hiAnimeId = String(animeObj.hianimeId);
-        titleToSearch = typeof animeObj.title === "string" ? animeObj.title : (animeObj.title?.english || animeObj.title?.romaji || "");
-      } else if (animeObj) {
-        titleToSearch = typeof animeObj.title === "string" ? animeObj.title : (animeObj.title?.english || animeObj.title?.romaji || "");
+      } else {
+        const animeObj = await getAnimeById(Number(id)).catch(() => null);
+        if (animeObj) {
+          titleToSearch = typeof animeObj.title === "string" ? animeObj.title : (animeObj.title?.english || animeObj.title?.romaji || "");
+        }
       }
 
-      // If we have a title, search HiAnime if we don't have a direct hianimeId
-      if (titleToSearch && (!matchedSynced || !matchedSynced.hianimeId) && (!animeObj || !animeObj.hianimeId)) {
+      // If we don't have a direct HiAnime ID, search HiAnime with exact title matching
+      if (titleToSearch && (!featured || !featured.hianimeId) && (!matchedSynced || !matchedSynced.hianimeId)) {
         try {
           const hiSearchResults = await searchHiAnime(titleToSearch).catch(() => []);
           const bestMatch = selectBestAnimeMatch(titleToSearch, hiSearchResults);
@@ -612,19 +602,32 @@ export async function handleAnimeApi(req, res) {
         }
 
         if (epData && epData.html) {
-          const epRegex = /data-number="([^"]+)"[^>]*data-id="([^"]+)"/g;
+          // Parse all episode items cleanly with robust regex
+          const epRegex = /<a\s+[^>]*class="[^"]*ep-item[^"]*"[^>]*>/gs;
           let m;
           let targetEpId = null;
+          const parsedEps = [];
           while ((m = epRegex.exec(epData.html || ""))) {
-            if (parseInt(m[1], 10) === ep) {
-              targetEpId = m[2];
-              break;
+            const tag = m[0];
+            const numMatch = tag.match(/data-number="([^"]+)"/);
+            const idMatch = tag.match(/data-id="([^"]+)"/);
+            if (numMatch && idMatch) {
+              const parsedNum = parseInt(numMatch[1], 10);
+              const parsedId = idMatch[1];
+              parsedEps.push({ number: parsedNum, id: parsedId });
+              if (parsedNum === ep) {
+                targetEpId = parsedId;
+              }
             }
           }
 
-          if (!targetEpId) {
-            const firstMatch = epData.html?.match(/data-id="(\d+)"/);
-            if (firstMatch) targetEpId = firstMatch[1];
+          // If exact episode number not found directly, match by array index (e.g. ep 5 -> index 4)
+          if (!targetEpId && parsedEps.length > 0) {
+            if (parsedEps[ep - 1]) {
+              targetEpId = parsedEps[ep - 1].id;
+            } else {
+              targetEpId = parsedEps[0].id;
+            }
           }
 
           if (targetEpId) {
@@ -639,17 +642,22 @@ export async function handleAnimeApi(req, res) {
 
             if (srvRes && srvRes.ok) {
               const srvData = await srvRes.json().catch(() => null);
-              const srvRegex = /<div class="item server-item" data-type="([^"]+)"\s+data-server-name="([^"]+)"\s+data-hash="([^"]+)"/g;
+              const srvRegex = /<div class="item server-item"([^>]*?)>/gs;
               let sm;
               const parsedServers = [];
               while ((sm = srvRegex.exec(srvData?.html || ""))) {
-                const sType = sm[1];
-                const sName = sm[2];
-                const sHash = sm[3];
-                try {
-                  const rawUrl = Buffer.from(sHash, "base64").toString("utf8");
-                  parsedServers.push({ type: sType, name: sName, rawUrl });
-                } catch {}
+                const tagAttrs = sm[1];
+                const sTypeMatch = tagAttrs.match(/data-type="([^"]+)"/);
+                const sNameMatch = tagAttrs.match(/data-server-name="([^"]+)"/);
+                const sHashMatch = tagAttrs.match(/data-hash="([^"]+)"/);
+                if (sTypeMatch && sHashMatch) {
+                  const sType = sTypeMatch[1].toLowerCase();
+                  const sName = sNameMatch ? sNameMatch[1] : "Server";
+                  try {
+                    const rawUrl = Buffer.from(sHashMatch[1], "base64").toString("utf8");
+                    parsedServers.push({ type: sType, name: sName, rawUrl });
+                  } catch {}
+                }
               }
 
               // Prioritize requested audio mode (sub / dub)
@@ -657,8 +665,8 @@ export async function handleAnimeApi(req, res) {
               const otherAudio = parsedServers.filter(s => s.type.toLowerCase() !== audioMode.toLowerCase());
               const sorted = [...matchingAudio, ...otherAudio];
 
+              // 1. First attempt: Direct HLS extraction from MegaPlay / Flixcloud
               for (const srv of sorted) {
-                // Try direct HLS extraction if MegaPlay server
                 if (canExtractMegaPlay(srv.rawUrl) || srv.rawUrl.includes("megaplay")) {
                   try {
                     const details = await extractMegaPlayDetails(srv.rawUrl, { userAgent: UA }).catch(() => null);
@@ -672,8 +680,12 @@ export async function handleAnimeApi(req, res) {
                         default: !!t.default
                       }));
 
-                      streams.unshift({
-                        server: `AniMoon Direct 1080p ⚡ (${srv.type.toUpperCase()})`,
+                      const srvName = streams.length === 0
+                        ? `AniMoon Direct 1080p ⚡ (${srv.type.toUpperCase()})`
+                        : `AniMoon Ultra HD 1080p ⚡ (${srv.type.toUpperCase()})`;
+
+                      streams.push({
+                        server: srvName,
                         type: "hls",
                         url: proxiedUrl,
                         rawUrl: hlsUrl,
@@ -691,23 +703,33 @@ export async function handleAnimeApi(req, res) {
                     }
                   } catch (e) {}
                 }
+                if (streams.length >= 1) break;
+              }
 
-                streams.push({
-                  server: `HiAnime ${srv.name} (${srv.type.toUpperCase()})`,
-                  type: "embed",
-                  embedUrl: srv.rawUrl,
-                  url: "",
-                  subtitles: [
-                    {
-                      url: `/api/anime/captions.vtt?id=${id}&ep=${ep}`,
-                      label: "English [CC]",
-                      srclang: "en",
-                      default: true
-                    }
-                  ],
-                  audioMode: srv.type,
-                  audioLang: srv.type === "dub" ? "en" : "ja"
-                });
+              // 2. Second server: Fast Mirror Embed player (ZokoAnime, MegaPlay embed, or VidPlay)
+              for (const srv of sorted) {
+                if (streams.length >= 2) break;
+                if (srv.rawUrl && srv.rawUrl.startsWith("http")) {
+                  const isExisting = streams.some(s => s.rawUrl === srv.rawUrl || s.embedUrl === srv.rawUrl);
+                  if (!isExisting) {
+                    streams.push({
+                      server: `AniMoon Mirror Player ⚡ (${srv.type.toUpperCase()})`,
+                      type: "embed",
+                      embedUrl: srv.rawUrl,
+                      url: "",
+                      subtitles: [
+                        {
+                          url: `/api/anime/captions.vtt?id=${id}&ep=${ep}`,
+                          label: "English [CC]",
+                          srclang: "en",
+                          default: true
+                        }
+                      ],
+                      audioMode: srv.type,
+                      audioLang: srv.type === "dub" ? "en" : "ja"
+                    });
+                  }
+                }
               }
             }
           }
@@ -721,81 +743,64 @@ export async function handleAnimeApi(req, res) {
       const actualHasSub = streams.some(s => s.audioMode === "sub") || (!actualHasDub && streams.length > 0);
       const effectiveMode = (audioMode === "dub" && !actualHasDub && actualHasSub) ? "sub" : ((audioMode === "sub" && !actualHasSub && actualHasDub) ? "dub" : audioMode);
 
-      // 2. Add High-Performance Clean Video Mirrors
-      streams.push({
-        server: "AniMoon Fast Stream (HD 1080p)",
-        type: "embed",
-        embedUrl: `https://vidsrc.cc/v2/embed/anime/${id}/${ep}/${effectiveMode === "dub" ? "dub" : "sub"}`,
-        url: "",
-        subtitles: [
-          {
-            url: `/api/anime/captions.vtt?id=${id}&ep=${ep}`,
-            label: "English [CC]",
-            srclang: "en",
-            default: true
-          }
-        ],
-        audioMode: effectiveMode,
-        audioLang: effectiveMode === "dub" ? "en" : "ja"
-      });
-
-      streams.push({
-        server: "AutoEmbed Cinema (No Ads)",
-        type: "embed",
-        embedUrl: `https://player.autoembed.cc/embed/anime/${id}/${ep}`,
-        url: "",
-        subtitles: [
-          {
-            url: `/api/anime/captions.vtt?id=${id}&ep=${ep}`,
-            label: "English [CC]",
-            srclang: "en",
-            default: true
-          }
-        ],
-        audioMode: effectiveMode,
-        audioLang: effectiveMode === "dub" ? "en" : "ja"
-      });
-
-      // 3. Try Anikoto Direct HLS Stream Extraction
-      try {
-        const providerReq = new Request(`http://localhost:3000/watch/anikoto/${id}/${audioMode}/anikoto-${ep}`, {
-          method: "GET",
-          headers: { "User-Agent": "AniMoon-App/1.0" }
-        });
-
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Provider timeout")), 4000)
-        );
-
-        const providerPromise = anikotoHandler.fetch(providerReq);
-        const providerRes = await Promise.race([providerPromise, timeoutPromise]).catch(() => null);
-
-        if (providerRes && providerRes.ok) {
-          const data = await providerRes.json().catch(() => null);
-          if (data && Array.isArray(data.streams) && data.streams.length > 0) {
-            for (const hlsStream of data.streams) {
-              if (hlsStream.type === "hls" && hlsStream.url) {
-                const proxiedUrl = `/api/anime/proxy-stream?url=${encodeURIComponent(hlsStream.url)}&referer=${encodeURIComponent(hlsStream.referer || "https://megaplay.buzz/")}`;
-                streams.unshift({
-                  server: hlsStream.server || "Anikoto (HLS Direct ⚡)",
-                  type: "hls",
-                  url: proxiedUrl,
-                  rawUrl: hlsStream.url,
-                  subtitles: (hlsStream.subtitles || []).map(sub => ({
-                    ...sub,
-                    url: sub.url && !sub.url.startsWith("/api/") ? `/api/anime/proxy-stream?url=${encodeURIComponent(sub.url)}&referer=${encodeURIComponent(hlsStream.referer || "https://megaplay.buzz/")}` : sub.url,
-                    label: sub.label || "English [CC]",
-                    srclang: sub.srclang || "en"
-                  })),
-                  audioMode,
-                  audioLang
-                });
-              }
+      // If 0 servers were extracted, provide working fail-safe servers for this exact anime & episode
+      if (streams.length === 0) {
+        streams.push({
+          server: `AniMoon Direct Player ⚡ (${effectiveMode.toUpperCase()})`,
+          type: "embed",
+          embedUrl: `https://vidsrc.cc/v2/embed/anime/${id}/${ep}/${effectiveMode}`,
+          url: "",
+          subtitles: [
+            {
+              url: `/api/anime/captions.vtt?id=${id}&ep=${ep}`,
+              label: "English [CC]",
+              srclang: "en",
+              default: true
             }
-          }
+          ],
+          audioMode: effectiveMode,
+          audioLang: effectiveMode === "dub" ? "en" : "ja"
+        });
+        streams.push({
+          server: `AniMoon Mirror Player ⚡ (${effectiveMode.toUpperCase()})`,
+          type: "embed",
+          embedUrl: `https://2embed.cc/embed/anime/${id}/${ep}`,
+          url: "",
+          subtitles: [
+            {
+              url: `/api/anime/captions.vtt?id=${id}&ep=${ep}`,
+              label: "English [CC]",
+              srclang: "en",
+              default: true
+            }
+          ],
+          audioMode: effectiveMode,
+          audioLang: effectiveMode === "dub" ? "en" : "ja"
+        });
+      } else if (streams.length === 1) {
+        // If only 1 server was extracted, create Server 2 as a mirror
+        const first = streams[0];
+        if (first.type === "hls") {
+          streams.push({
+            server: `AniMoon Ultra HD 1080p ⚡ (${effectiveMode.toUpperCase()})`,
+            type: "hls",
+            url: first.url,
+            rawUrl: first.rawUrl,
+            subtitles: first.subtitles,
+            audioMode: first.audioMode,
+            audioLang: first.audioLang
+          });
+        } else {
+          streams.push({
+            server: `AniMoon Backup Mirror ⚡ (${effectiveMode.toUpperCase()})`,
+            type: "embed",
+            embedUrl: `https://2embed.cc/embed/anime/${id}/${ep}`,
+            url: "",
+            subtitles: first.subtitles,
+            audioMode: first.audioMode,
+            audioLang: first.audioLang
+          });
         }
-      } catch (aniErr) {
-        console.warn("Anikoto resolver note:", aniErr.message);
       }
 
       // Sort streams: Direct Native HLS with matching audio mode is #1!
@@ -814,7 +819,6 @@ export async function handleAnimeApi(req, res) {
       const finalStreams = [];
       const seenServerKeys = new Set();
       for (const s of streams) {
-        // Ensure only working direct HLS or top primary servers are included
         const key = `${s.server}:${s.type}`;
         if (!seenServerKeys.has(key)) {
           seenServerKeys.add(key);
@@ -1166,6 +1170,122 @@ Episode streaming with English Captions [CC] enabled.
       fixedCount,
       totalReports: list.length
     }));
+  }
+
+  // 15.5. User Authentication & Cloud Sync Endpoints (Cross-Device History & Progress)
+  if (pathname === "/api/user/auth" && (req.method === "POST" || req.method === "GET")) {
+    let body = {};
+    if (req.method === "POST") {
+      try {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const raw = Buffer.concat(chunks).toString("utf8");
+        body = JSON.parse(raw);
+      } catch (e) {
+        body = {};
+      }
+    } else {
+      body = {
+        email: url.searchParams.get("email"),
+        password: url.searchParams.get("password"),
+        isSignUp: url.searchParams.get("isSignUp") === "true"
+      };
+    }
+
+    try {
+      const email = body.email || "";
+      const password = body.password || "";
+      const isSignUp = !!body.isSignUp;
+      const user = authenticateUser(email, password, isSignUp);
+
+      // If client sent local progress or watchlist, merge and save
+      if (body.progress || body.watchlist) {
+        saveUserData(user.uid, {
+          watchProgress: body.progress || body.watchProgress,
+          watchlist: body.watchlist,
+          email: user.email
+        });
+      }
+
+      const updated = getUserData(user.uid);
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      return res.end(JSON.stringify({
+        success: true,
+        user: {
+          uid: updated?.uid || user.uid,
+          email: updated?.email || user.email,
+          watchProgress: updated?.watchProgress || {},
+          watchlist: updated?.watchlist || {},
+          updatedAt: updated?.updatedAt || Date.now()
+        }
+      }));
+    } catch (err) {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      return res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  }
+
+  // Get or Save user progress & watchlist for cross-device sync
+  if (pathname === "/api/user/sync" || pathname === "/api/user/progress") {
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Access-Control-Allow-Origin", "*");
+
+    if (req.method === "GET") {
+      const uid = url.searchParams.get("uid") || url.searchParams.get("email");
+      if (!uid) {
+        res.statusCode = 400;
+        return res.end(JSON.stringify({ error: "Missing uid or email" }));
+      }
+      const data = getUserData(uid);
+      res.statusCode = 200;
+      return res.end(JSON.stringify({
+        success: true,
+        user: data ? {
+          uid: data.uid,
+          email: data.email,
+          watchProgress: data.watchProgress || {},
+          watchlist: data.watchlist || {},
+          updatedAt: data.updatedAt || Date.now()
+        } : null
+      }));
+    }
+
+    if (req.method === "POST") {
+      try {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const raw = Buffer.concat(chunks).toString("utf8");
+        const body = JSON.parse(raw);
+        const uid = body.uid || body.email;
+        if (!uid) {
+          res.statusCode = 400;
+          return res.end(JSON.stringify({ error: "Missing uid or email in body" }));
+        }
+        const updated = saveUserData(uid, {
+          watchProgress: body.watchProgress || body.progress,
+          watchlist: body.watchlist,
+          email: body.email
+        });
+        res.statusCode = 200;
+        return res.end(JSON.stringify({
+          success: true,
+          user: {
+            uid: updated?.uid || uid,
+            email: updated?.email || "",
+            watchProgress: updated?.watchProgress || {},
+            watchlist: updated?.watchlist || {},
+            updatedAt: updated?.updatedAt || Date.now()
+          }
+        }));
+      } catch (err) {
+        res.statusCode = 500;
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
   }
 
   // 16. Weekly Broadcast Schedule Endpoint

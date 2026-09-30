@@ -4819,7 +4819,7 @@
   <!-- Modular Firestore targeting custom databaseId ai-studio-animoon-666a79c3-aef4-412e-b01e-6b84b6736814 -->
   <script type="module">
     import { getApp } from 'https://www.gstatic.com/firebasejs/10.11.0/firebase-app.js';
-    import { getFirestore, doc, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js';
+    import { getFirestore, doc, getDoc, setDoc, getDocFromServer } from 'https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js';
 
     window.initModularFirestore = function() {
       try {
@@ -4832,8 +4832,18 @@
           },
           setUserData: async (uid, data) => {
             return await setDoc(doc(db, 'users', uid), data, { merge: true });
+          },
+          testConnection: async () => {
+            try {
+              await getDocFromServer(doc(db, 'test', 'connection'));
+            } catch (error) {
+              if (error instanceof Error && error.message.includes('the client is offline')) {
+                console.error("Please check your Firebase configuration.");
+              }
+            }
           }
         };
+        window.cloudFirestore.testConnection();
       } catch (err) {
         console.warn("Modular Firestore setup note:", err);
       }
@@ -6453,7 +6463,7 @@
           <div class="continue-card" onclick="openPlayerById(${item.animeId})">
             <button class="continue-remove-btn" onclick="removeAnimeProgress('${item.animeId}', event)" title="Remove from Continue Watching">✕</button>
             <div class="continue-poster-box">
-              <img src="${item.coverImage || 'https://cdn.anipixcdn.co/thumbnail/072b030ba126b2f4b2374f342be9ed44.jpg'}" referrerpolicy="no-referrer" onerror="handleImgError(this)" alt="${escapeHtml(item.title || 'Anime')}"/>
+              <img src="${item.coverImage || 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg'}" referrerpolicy="no-referrer" onerror="handleImgError(this)" alt="${escapeHtml(item.title || 'Anime')}"/>
               <div class="continue-play-overlay">
                 <div class="play-circle" style="width: 44px; height: 44px;">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -6535,7 +6545,7 @@
         delete list[idStr];
         showToastNotification(`Removed "${titleStr}" from Watchlist`);
       } else {
-        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || (typeof anime.coverImage === 'string' ? anime.coverImage : 'https://cdn.anipixcdn.co/thumbnail/072b030ba126b2f4b2374f342be9ed44.jpg');
+        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || (typeof anime.coverImage === 'string' ? anime.coverImage : 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg');
         list[idStr] = {
           id: Number(anime.id) || anime.id,
           title: anime.title || { english: titleStr, romaji: titleStr },
@@ -6755,7 +6765,7 @@
         const score = item.score || '8.5';
         const eps = item.episodes ? (typeof item.episodes === 'number' ? `${item.episodes} eps` : item.episodes) : 'Ongoing';
         const year = item.year || '2024';
-        const cover = item.coverImage || 'https://cdn.anipixcdn.co/thumbnail/072b030ba126b2f4b2374f342be9ed44.jpg';
+        const cover = item.coverImage || 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg';
 
         return `
           <div class="anime-card" onclick="openPlayerById(${item.id})">
@@ -6866,7 +6876,7 @@
         const title = anime.title?.english || anime.title?.romaji || 'Anime';
         const rank = anime.rank || (index + 1);
         const rankStr = rank < 10 ? '0' + rank : String(rank);
-        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.bannerImage || 'https://cdn.anipixcdn.co/thumbnail/072b030ba126b2f4b2374f342be9ed44.jpg';
+        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.bannerImage || 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg';
 
         return `
           <div class="hianime-trending-item" onclick="openPlayerById(${anime.id})" title="${escapeHtml(title)}">
@@ -7038,7 +7048,7 @@
           return;
         }
       }
-      img.src = 'https://cdn.anipixcdn.co/thumbnail/072b030ba126b2f4b2374f342be9ed44.jpg';
+      img.src = '/api/anime/image-proxy?url=fallback';
     }
 
     function renderHero(anime) {
@@ -7143,7 +7153,7 @@
         const score = anime.averageScore ? (anime.averageScore / 10).toFixed(1) : (anime.score || '8.4');
         const eps = anime.episodes ? `${anime.episodes} eps` : 'Ongoing';
         const year = anime.seasonYear || anime.year || '2024';
-        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || 'https://cdn.anipixcdn.co/thumbnail/072b030ba126b2f4b2374f342be9ed44.jpg';
+        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg';
         const inWatchlist = !!storedWatchlist[String(anime.id)];
 
         return `
@@ -7210,7 +7220,7 @@
 
       container.innerHTML = upcomingList.map(anime => {
         const title = anime.title?.english || anime.title?.romaji || anime.title || 'Anime';
-        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || 'https://cdn.anipixcdn.co/thumbnail/072b030ba126b2f4b2374f342be9ed44.jpg';
+        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg';
         const format = anime.format || 'TV';
         const eps = anime.episodes || '?';
         const release = anime.releaseDate || 'Upcoming';
@@ -7248,7 +7258,7 @@
 
       container.innerHTML = list.map(anime => {
         const title = anime.title?.english || anime.title?.romaji || anime.title || 'Anime';
-        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || 'https://cdn.anipixcdn.co/thumbnail/072b030ba126b2f4b2374f342be9ed44.jpg';
+        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg';
         const sub = anime.subCount !== undefined ? anime.subCount : (anime.episodes || 0);
         const dub = anime.dubCount !== undefined ? anime.dubCount : 0;
         const total = anime.totalEpisodes || anime.episodes || 0;
@@ -7326,7 +7336,7 @@
       container.innerHTML = list.slice(0, 7).map((anime, idx) => {
         const rank = String(idx + 1).padStart(2, '0');
         const title = anime.title?.english || anime.title?.romaji || anime.title || 'Anime';
-        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || 'https://cdn.anipixcdn.co/thumbnail/072b030ba126b2f4b2374f342be9ed44.jpg';
+        const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg';
         const sub = anime.subCount || (anime.episodes > 100 ? 1179 : anime.episodes) || 12;
         const dub = anime.dubCount || Math.max(1, sub - 2);
 
@@ -7359,7 +7369,7 @@
 
         el.innerHTML = items.slice(0, 5).map(anime => {
           const title = anime.title?.english || anime.title?.romaji || anime.title || 'Anime';
-          const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || 'https://cdn.anipixcdn.co/thumbnail/072b030ba126b2f4b2374f342be9ed44.jpg';
+          const cover = anime.coverImage?.extraLarge || anime.coverImage?.large || anime.coverImage || anime.poster || 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-ELSYx3yMPcKM.jpg';
           const sub = anime.subCount || (anime.episodes > 100 ? 1179 : anime.episodes) || 12;
           const dub = anime.dubCount || Math.max(1, sub - 2);
           const total = anime.totalEpisodes || anime.episodes || 0;
@@ -7692,7 +7702,12 @@
     // VIDEO PLAYER & EPISODES
     // ==========================================
     function openPlayerById(id) {
-      const anime = currentCatalog.find(a => a.id === id);
+      const anime = (currentCatalog && currentCatalog.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id))) ||
+                    (trendingCarouselData && trendingCarouselData.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id))) ||
+                    (cachedHomeData?.spotlightAnimes && cachedHomeData.spotlightAnimes.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id))) ||
+                    (cachedHomeData?.latestEpisodeAnimes && cachedHomeData.latestEpisodeAnimes.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id))) ||
+                    (cachedHomeData?.topAiringAnimes && cachedHomeData.topAiringAnimes.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id))) ||
+                    (cachedHomeData?.mostPopularAnimes && cachedHomeData.mostPopularAnimes.find(a => String(a.id) === String(id) || String(a.hianimeId) === String(id)));
       const prog = getAnimeProgress(id);
       const targetEp = (prog && prog.episode) ? prog.episode : 1;
       const resumeTime = (prog && prog.time > 5 && !prog.completed) ? prog.time : 0;
@@ -8650,12 +8665,13 @@
         if (currentStreams.length > 0) {
           playStream(currentStreams[0]);
         } else {
-          // Fallback embed
-          playEmbed(`https://megaplay.buzz/stream/s-2/${animeId}/${audio}?ep=${episode}`);
+          loaderText.textContent = `Episode ${episode} stream is currently refreshing. Please retry shortly.`;
+          loader.style.display = 'flex';
         }
       } catch (err) {
-        console.warn('Stream resolution error, loading fallback mirror:', err);
-        playEmbed(`https://megaplay.buzz/stream/s-2/${animeId}/${audio}?ep=${episode}`);
+        console.warn('Stream resolution error:', err);
+        loaderText.textContent = `Playback is preparing for Episode ${episode}. Please retry in a moment.`;
+        loader.style.display = 'flex';
       }
     }
 
@@ -9264,6 +9280,9 @@
 
         if (user) {
           // Logged In
+          localStorage.setItem('animeq_saved_user_email', user.email);
+          localStorage.setItem('animeq_saved_user_uid', user.uid);
+
           if (loginBtn) loginBtn.style.display = 'none';
           if (profileDropdown) profileDropdown.style.display = 'block';
           if (emailDisplay) emailDisplay.textContent = user.email;
@@ -9271,12 +9290,23 @@
           
           showAuthToast(`Welcome back, ${user.email.split('@')[0]}!`);
           
-          // Pull from Cloud and Sync with localStorage
+          // Pull from Cloud & Server to sync with localStorage across all devices
           pullFromFirebaseAndMerge(user.uid);
         } else {
-          // Logged Out
-          if (loginBtn) loginBtn.style.display = 'block';
-          if (profileDropdown) profileDropdown.style.display = 'none';
+          // Check if user previously logged in on this browser
+          const savedEmail = localStorage.getItem('animeq_saved_user_email');
+          const savedUid = localStorage.getItem('animeq_saved_user_uid');
+          if (savedEmail && savedUid) {
+            if (loginBtn) loginBtn.style.display = 'none';
+            if (profileDropdown) profileDropdown.style.display = 'block';
+            if (emailDisplay) emailDisplay.textContent = savedEmail;
+            if (userInitial) userInitial.textContent = savedEmail.charAt(0).toUpperCase();
+            pullFromFirebaseAndMerge(savedUid, true);
+          } else {
+            // Logged Out
+            if (loginBtn) loginBtn.style.display = 'block';
+            if (profileDropdown) profileDropdown.style.display = 'none';
+          }
         }
       });
     }
@@ -9339,25 +9369,85 @@
       if (submitBtn) submitBtn.disabled = true;
       const submitText = document.getElementById('authSubmitText');
       const originalText = submitText ? submitText.textContent : 'Submit';
-      if (submitText) submitText.textContent = 'Please wait...';
+      if (submitText) submitText.textContent = 'Syncing account...';
 
       try {
-        if (currentAuthMode === 'signin') {
-          await firebase.auth().signInWithEmailAndPassword(email, password);
-        } else {
-          await firebase.auth().createUserWithEmailAndPassword(email, password);
+        let serverUser = null;
+        let serverError = null;
+
+        // 1. Direct Server Account & Progress sync (Cross-device, cross-browser guarantee)
+        try {
+          const authRes = await fetch('/api/user/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email,
+              password,
+              isSignUp: currentAuthMode === 'signup',
+              progress: getStoredProgress(),
+              watchlist: getStoredWatchlist()
+            })
+          });
+          const authData = await authRes.json();
+          if (authData && authData.success && authData.user) {
+            serverUser = authData.user;
+          } else if (authData && authData.error) {
+            serverError = authData.error;
+          }
+        } catch (serverErr) {
+          console.warn("Server auth note:", serverErr.message);
         }
-        closeAuthModal();
-        if (emailInput) emailInput.value = '';
-        if (passInput) passInput.value = '';
+
+        // 2. Firebase Auth integration
+        let fbSuccess = false;
+        try {
+          if (currentAuthMode === 'signin') {
+            await firebase.auth().signInWithEmailAndPassword(email, password);
+          } else {
+            await firebase.auth().createUserWithEmailAndPassword(email, password);
+          }
+          fbSuccess = true;
+        } catch (fbErr) {
+          console.warn("Firebase Auth note:", fbErr.message);
+        }
+
+        // If either succeeded, proceed with login & restore all past history from other devices
+        if (serverUser || fbSuccess) {
+          const activeUid = (firebase.auth().currentUser && firebase.auth().currentUser.uid) || serverUser?.uid;
+          
+          localStorage.setItem('animeq_saved_user_email', email);
+          localStorage.setItem('animeq_saved_user_uid', activeUid);
+
+          // Restore and merge all watch progress and watchlist from the cloud/server
+          await pullFromFirebaseAndMerge(activeUid, false, serverUser);
+
+          // Update UI headers
+          const loginBtn = document.getElementById('userLoginBtn');
+          const profileDropdown = document.getElementById('userProfileDropdown');
+          const emailDisplay = document.getElementById('userEmailDisplay');
+          const userInitial = document.getElementById('userInitial');
+
+          if (loginBtn) loginBtn.style.display = 'none';
+          if (profileDropdown) profileDropdown.style.display = 'block';
+          if (emailDisplay) emailDisplay.textContent = email;
+          if (userInitial) userInitial.textContent = email.charAt(0).toUpperCase();
+
+          closeAuthModal();
+          showAuthToast(`Welcome, ${email.split('@')[0]}! Your history is restored ✨`);
+          showToastNotification('Account synced! All your previous history and progress are loaded 🚀');
+          if (emailInput) emailInput.value = '';
+          if (passInput) passInput.value = '';
+          return;
+        }
+
+        if (errorMsg) {
+          errorMsg.textContent = serverError || 'Unable to sign in. Please verify your email and password.';
+          errorMsg.style.display = 'block';
+        }
       } catch (err) {
         console.warn("Auth error:", err);
         if (errorMsg) {
-          if (err.code === 'auth/operation-not-allowed' || (err.message && err.message.includes('OPERATION_NOT_ALLOWED'))) {
-            errorMsg.innerHTML = 'Email/password is restricted on this project. Please click <strong>Sign in with Google</strong> below or continue watching!';
-          } else {
-            errorMsg.textContent = err.message;
-          }
+          errorMsg.textContent = err.message || 'Authentication error. Please retry.';
           errorMsg.style.display = 'block';
         }
       } finally {
@@ -9467,7 +9557,7 @@
       return false;
     }
 
-    async function pullFromFirebaseAndMerge(uid, silent = false) {
+    async function pullFromFirebaseAndMerge(uid, silent = false, providedServerUser = null) {
       if (!uid) return;
       try {
         const localProgress = getStoredProgress() || {};
@@ -9486,11 +9576,26 @@
         let remoteProgress = {};
         let remoteWatchlist = {};
 
-        // Read from targeted Firestore named database
+        // 1. If provided server user object
+        if (providedServerUser) {
+          remoteProgress = { ...(providedServerUser.watchProgress || {}) };
+          remoteWatchlist = { ...(providedServerUser.watchlist || {}) };
+        } else {
+          // Fetch from Server sync API to restore history from other phones or browsers
+          try {
+            const srvRes = await fetch(`/api/user/sync?uid=${encodeURIComponent(uid)}`).then(r => r.json());
+            if (srvRes && srvRes.user) {
+              remoteProgress = { ...(srvRes.user.watchProgress || {}) };
+              remoteWatchlist = { ...(srvRes.user.watchlist || {}) };
+            }
+          } catch (e) {}
+        }
+
+        // 2. Read from targeted Firestore named database as well
         const remoteData = await getCloudUserData(uid);
         if (remoteData) {
-          remoteProgress = remoteData.watchProgress || {};
-          remoteWatchlist = remoteData.watchlist || {};
+          remoteProgress = { ...remoteProgress, ...(remoteData.watchProgress || {}) };
+          remoteWatchlist = { ...remoteWatchlist, ...(remoteData.watchlist || {}) };
         }
 
         // Deep merge progress across local, userLocal, and remote
@@ -9527,14 +9632,24 @@
         renderContinueWatchingSection();
         updateWatchlistUI();
 
-        // Write merged back to Firestore
+        // Write merged back to Firestore & Server
         const currentUser = (typeof firebase !== 'undefined' && firebase.auth) ? firebase.auth().currentUser : null;
+        const currentEmail = (currentUser && currentUser.email) || localStorage.getItem('animeq_saved_user_email') || 'user@animoon.me';
+
         await setCloudUserData(uid, {
-          email: (currentUser && currentUser.email) || 'user@animoon.me',
+          email: currentEmail,
           watchProgress: mergedProgress,
           watchlist: mergedWatchlist,
           updatedAt: Date.now()
         });
+
+        try {
+          fetch('/api/user/progress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid, email: currentEmail, watchProgress: mergedProgress, watchlist: mergedWatchlist })
+          });
+        } catch (e) {}
 
         if (!silent) {
           showAuthToast("Watch progress & Watchlist synced! ☁️");
@@ -9545,11 +9660,12 @@
     }
 
     async function syncProgressLocalToFirebase(silent = false) {
-      const user = (typeof firebase !== 'undefined' && firebase.auth) ? firebase.auth().currentUser : null;
-      if (!user) return;
+      const fbUser = (typeof firebase !== 'undefined' && firebase.auth) ? firebase.auth().currentUser : null;
+      const uid = (fbUser && fbUser.uid) || localStorage.getItem('animeq_saved_user_uid');
+      if (!uid) return;
       if (!silent) showAuthToast("Syncing with cloud...");
       try {
-        await pullFromFirebaseAndMerge(user.uid, silent);
+        await pullFromFirebaseAndMerge(uid, silent);
         if (!silent) showAuthToast("Cloud sync complete! ✨");
       } catch (err) {
         if (!silent) showAuthToast("Sync note: progress cached locally");
@@ -9574,34 +9690,62 @@
     // Direct Sync hooks
     let cloudSaveDebounceTimer = null;
     function saveProgressToCloud() {
-      const user = (typeof firebase !== 'undefined' && firebase.auth) ? firebase.auth().currentUser : null;
-      if (!user) return;
+      const fbUser = (typeof firebase !== 'undefined' && firebase.auth) ? firebase.auth().currentUser : null;
+      const savedEmail = localStorage.getItem('animeq_saved_user_email');
+      const savedUid = localStorage.getItem('animeq_saved_user_uid');
+      const uid = (fbUser && fbUser.uid) || savedUid;
+      const email = (fbUser && fbUser.email) || savedEmail;
+      if (!uid) return;
 
       const progress = getStoredProgress();
-      localStorage.setItem(`animeq_user_progress_${user.uid}`, JSON.stringify(progress));
+      localStorage.setItem(`animeq_user_progress_${uid}`, JSON.stringify(progress));
 
       clearTimeout(cloudSaveDebounceTimer);
       cloudSaveDebounceTimer = setTimeout(async () => {
-        await setCloudUserData(user.uid, {
-          email: user.email || 'user@animoon.me',
+        // 1. Save to Firestore
+        await setCloudUserData(uid, {
+          email: email || 'user@animoon.me',
           watchProgress: progress,
           updatedAt: Date.now()
         });
+
+        // 2. Save to Server database for cross-device/browser sync
+        try {
+          fetch('/api/user/progress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid, email, watchProgress: progress })
+          });
+        } catch (e) {}
       }, 1000);
     }
 
     function saveWatchlistToCloud() {
-      const user = (typeof firebase !== 'undefined' && firebase.auth) ? firebase.auth().currentUser : null;
-      if (!user) return;
+      const fbUser = (typeof firebase !== 'undefined' && firebase.auth) ? firebase.auth().currentUser : null;
+      const savedEmail = localStorage.getItem('animeq_saved_user_email');
+      const savedUid = localStorage.getItem('animeq_saved_user_uid');
+      const uid = (fbUser && fbUser.uid) || savedUid;
+      const email = (fbUser && fbUser.email) || savedEmail;
+      if (!uid) return;
 
       const watchlist = getStoredWatchlist();
-      localStorage.setItem(`animeq_user_watchlist_${user.uid}`, JSON.stringify(watchlist));
+      localStorage.setItem(`animeq_user_watchlist_${uid}`, JSON.stringify(watchlist));
 
-      setCloudUserData(user.uid, {
-        email: user.email || 'user@animoon.me',
+      // 1. Save to Firestore
+      setCloudUserData(uid, {
+        email: email || 'user@animoon.me',
         watchlist: watchlist,
         updatedAt: Date.now()
       });
+
+      // 2. Save to Server database
+      try {
+        fetch('/api/user/progress', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid, email, watchlist })
+        });
+      } catch (e) {}
     }
 
     // ==========================================
