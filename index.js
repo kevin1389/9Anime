@@ -17,6 +17,7 @@ import animeonsenHandler           from "./providers/animeonsen.js";
 import { getEpisodesResponse, getFilteredEpisodesResponse } from "./core/episode-cache.js";
 import { resolveProviders }         from "./core/episode-strategy.js";
 import { getAsync, setAsync, isFresh, mapTTL, WATCH_TTL, _CACHE_ENABLED } from "./core/smartcache.js";
+import { getIndexHtml, getLogoSvg } from "./core/index-html.js";
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -89,41 +90,23 @@ export default {
       path === "/app" ||
       path === "/home"
     ) {
-      try {
-        const fs = await import("fs");
-        const p = await import("path");
-        const filePath = p.join(process.cwd(), "public", "index.html");
-        if (fs.existsSync(filePath)) {
-          const html = fs.readFileSync(filePath, "utf8");
-          return new Response(html, {
-            status: 200,
-            headers: {
-              "Content-Type": "text/html; charset=utf-8",
-              "Cache-Control": "public, max-age=0, must-revalidate",
-            },
-          });
-        }
-      } catch (e) {
-        console.error("Static serve error:", e);
-      }
+      return new Response(getIndexHtml(), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=0, must-revalidate",
+        },
+      });
     }
 
     if (path === "/logo.svg") {
-      try {
-        const fs = await import("fs");
-        const p = await import("path");
-        const filePath = p.join(process.cwd(), "public", "logo.svg");
-        if (fs.existsSync(filePath)) {
-          const svg = fs.readFileSync(filePath, "utf8");
-          return new Response(svg, {
-            status: 200,
-            headers: {
-              "Content-Type": "image/svg+xml",
-              "Cache-Control": "public, max-age=86400",
-            },
-          });
-        }
-      } catch (e) {}
+      return new Response(getLogoSvg(), {
+        status: 200,
+        headers: {
+          "Content-Type": "image/svg+xml",
+          "Cache-Control": "public, max-age=86400",
+        },
+      });
     }
 
     let m = path.match(/^\/map\/(\d+)\/?$/);
@@ -358,22 +341,12 @@ export default {
     }
 
     // Default: Serve 99Anime streaming web app
-    try {
-      const fs = await import("fs");
-      const p = await import("path");
-      const filePath = p.join(process.cwd(), "public", "index.html");
-      if (fs.existsSync(filePath)) {
-        const html = fs.readFileSync(filePath, "utf8");
-        return new Response(html, {
-          status: 200,
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "public, max-age=0, must-revalidate",
-          },
-        });
-      }
-    } catch (e) {}
-
-    return new Response("Not Found", { status: 404 });
+    return new Response(getIndexHtml(), {
+      status: 200,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "public, max-age=0, must-revalidate",
+      },
+    });
   },
 };

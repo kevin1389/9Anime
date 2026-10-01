@@ -26,16 +26,12 @@
       "destination": "/api/index.js"
     },
     {
-      "source": "/app",
-      "destination": "/index.html"
+      "source": "/logo.svg",
+      "destination": "/api/index.js"
     },
     {
-      "source": "/",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/((?!api/|watch/|episodes/|stream/|map/|home).*)",
-      "destination": "/index.html"
+      "source": "/(.*)",
+      "destination": "/api/index.js"
     }
   ]
 }

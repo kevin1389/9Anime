@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node server.js",
     "start": "node server.js",
-    "build": "node -e \"console.log('Build OK')\""
+    "build": "node scripts/bundle-frontend.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

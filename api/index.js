@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import worker from "../index.js";
 import { handleAnimeApi } from "../core/anime-router.js";
+import { getIndexHtml, getLogoSvg } from "../core/index-html.js";
 
 const PUBLIC_DIR = path.join(process.cwd(), "public");
 
@@ -65,28 +66,32 @@ export default async function handler(req, res) {
     return res.end(Buffer.from(buf));
   }
 
-  // 3. Static assets from public folder (e.g. /logo.svg, /assets/...)
-  const sanitizedPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, "");
-  if (sanitizedPath !== "/" && sanitizedPath !== "") {
-    const targetFile = path.join(PUBLIC_DIR, sanitizedPath);
-    if (fs.existsSync(targetFile) && fs.statSync(targetFile).isFile()) {
-      const ext = path.extname(targetFile).toLowerCase();
-      const contentType = MIME_TYPES[ext] || "application/octet-stream";
-      res.statusCode = 200;
-      res.setHeader("Content-Type", contentType);
-      return res.end(fs.readFileSync(targetFile));
-    }
-  }
-
-  // 4. Default frontend SPA: Always serve 99Anime streaming web app
-  const indexPath = path.join(PUBLIC_DIR, "index.html");
-  if (fs.existsSync(indexPath)) {
+  // 3. Logo SVG asset
+  if (pathname === "/logo.svg") {
     res.statusCode = 200;
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    return res.end(fs.readFileSync(indexPath));
+    res.setHeader("Content-Type", "image/svg+xml");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    return res.end(getLogoSvg());
   }
 
-  // 5. Fallback if index.html is missing
-  res.statusCode = 404;
-  res.end("Not Found");
+  // 4. Try serving other static assets from public/ if available on disk
+  try {
+    const sanitizedPath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, "");
+    if (sanitizedPath !== "/" && sanitizedPath !== "" && sanitizedPath !== "index.html") {
+      const targetFile = path.join(PUBLIC_DIR, sanitizedPath);
+      if (fs.existsSync(targetFile) && fs.statSync(targetFile).isFile()) {
+        const ext = path.extname(targetFile).toLowerCase();
+        const contentType = MIME_TYPES[ext] || "application/octet-stream";
+        res.statusCode = 200;
+        res.setHeader("Content-Type", contentType);
+        return res.end(fs.readFileSync(targetFile));
+      }
+    }
+  } catch (e) {}
+
+  // 5. Default frontend SPA: Always serve 99Anime streaming web app
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+  return res.end(getIndexHtml());
 }
